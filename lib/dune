@@ -1,0 +1,3 @@
+(library
+ (libraries pprint gospel)
+ (name gospel2cfml))
