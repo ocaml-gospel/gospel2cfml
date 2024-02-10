@@ -32,8 +32,7 @@ let fname = match !fname with None -> usage () | Some f -> f
 let path2module p =
   Filename.basename p |> Filename.chop_extension |> String.capitalize_ascii
 
-let base_fname f =
-  Filename.basename f |> Filename.chop_extension
+let base_fname f = Filename.basename f |> Filename.chop_extension
 
 let type_check load_path name sigs =
   let md = init_muc name in
@@ -45,13 +44,13 @@ let type_check load_path name sigs =
 
 let () =
   let open Parser_frontend in
-  let load_path = [Filename.dirname fname] in
+  let load_path = [ Filename.dirname fname ] in
   let ocaml = parse_ocaml fname in
   let module_nm = path2module fname in
   let sigs = parse_gospel ~filename:fname ocaml module_nm in
   let file = type_check load_path fname sigs in
   let file_sep = Tast2sep.process_sigs file in
   let file_cfml = Sep2coq.sep_defs file_sep in
-  let out_fname = (base_fname fname) ^ "_mli.v" in
+  let out_fname = base_fname fname ^ "_mli.v" in
   let fmt = formatter_of_out_channel (open_out out_fname) in
   fprintf fmt "%s@." (Print_coq.tops file_cfml)
