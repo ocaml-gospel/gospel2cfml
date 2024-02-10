@@ -36,5 +36,5 @@ build: [
 ]
 
 pin-depends: [
-  "gospel.dev" "git+https://github.com/ocaml-gospel/gospel.git#ec2f99eec7126eb21ae77bd3f66a38b37b552eb3"
+  "gospel.dev" "git+https://github.com/mrjazzybread/gospel.git#ec2f99eec7126eb21ae77bd3f66a38b37b552eb3"
 ]
