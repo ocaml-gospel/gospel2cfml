@@ -15,9 +15,14 @@ let list = "Coq.Lists.List.list"
 let option = "Coq.Init.Datatypes.option"
 let length = "LibListZ.length"
 let head = "Gospel.hd_gospel"
+let tl = "Gospel.tl_gospel"
 let eq = "Coq.Init.Logic.eq"
 let app = "Coq.Lists.List.app"
+let update = "Gospel.update"
+let singleton = "Gospel.singleton"
+
 let type_mapping_list = [ ("sequence", list); ("option", option) ]
+
 
 let id_mapping_list =
   [
@@ -29,6 +34,9 @@ let id_mapping_list =
     ("infix =", eq);
     ("infix ++", app);
     ("length", length);
+    ("mixfix [->]", update);
+    ("tl", tl);
+    ("singleton", singleton);
   ]
 
 let ty_map =
@@ -44,6 +52,8 @@ let rec var_of_ty t =
   let coq_var x = coq_var (map_ty x) in
   match t.ty_node with
   | Tyapp (v, _) when ts_equal v ts_loc -> coq_var v.ts_ident.id_str
+  | Tyapp (v, [t1; t2]) when ts_equal v ts_arrow ->
+     coq_impl (var_of_ty t1) (var_of_ty t2)
   | Tyapp (v, l) -> coq_apps (coq_var v.ts_ident.id_str) (List.map var_of_ty l)
   | _ -> assert false
 
@@ -73,19 +83,29 @@ let rec coq_term t =
   match t.Tterm.t_node with
   | Tvar v -> coq_id v.vs_name
   | Tconst c -> coq_const c
+  | Tapp (f, [t]) when
+         f.ls_name.id_str = "integer_of_int" ||
+           f.ls_name.id_str = "to_seq" ->
+     coq_term t
+  | Tapp (f, [t1; t2])
+       when f.ls_name.id_str = "apply" ->
+     coq_app (coq_term t1) (coq_term t2)
   | Tapp (f, args) ->
-      if f.ls_name.id_str = "integer_of_int" then coq_term (List.hd args)
-      else
-        let var = coq_id f.ls_name in
-        coq_apps var (List.map coq_term args)
+     let var = coq_id f.ls_name in
+     coq_apps var (List.map coq_term args)
   | Tfield _ -> assert false
   | Tif _ -> assert false
   | Tcase (t, l) ->
       let case (p, _, t) = (coq_pattern p, coq_term t) in
       coq_match (coq_term t) (List.map case l)
-  | Tquant _ -> assert false
+  | Tquant(q, ids, t) ->
+     let f = match q with |Tforall -> coq_foralls |Texists -> coq_exists in
+     let ids = List.map gen_args ids in
+     f ids (coq_term t)
   | Tlambda _ -> assert false
-  | Tlet _ -> assert false
+  | Tlet (vs, t1, t2) ->
+     let id = coq_id vs.vs_name in
+     Coq_lettuple([id], coq_term t1, coq_term t2)
   | Tbinop (b, t1, t2) -> (
       let ct1 = coq_term t1 in
       let ct2 = coq_term t2 in
@@ -125,7 +145,7 @@ let gen_spec triple =
       match triple.triple_post with
       | Lambda (args, b) ->
           (List.map (fun v -> (v.vs_name.id_str, var_of_ty v.vs_ty)) args, b)
-      | b -> ([ ("__UNUSED__", val_type) ], b)
+      | b -> ([ ("__UNUSED__", coq_typ_unit) ], b)
     in
     coq_funs args (cfml_term body)
   in

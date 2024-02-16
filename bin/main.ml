@@ -54,5 +54,7 @@ let () =
   let file_sep = Tast2sep.process_sigs file in
   let file_cfml = Sep2coq.sep_defs file_sep in
   let out_fname = base_fname fname ^ "_mli.v" in
-  let fmt = formatter_of_out_channel (open_out out_fname) in
+  let directory = "../cfml2/examples/translations/" ^ (String.capitalize_ascii (base_fname fname)) ^ "/" ^ out_fname in
+  let fmt = formatter_of_out_channel (open_out directory) in
   fprintf fmt "%s@." (Print_coq.tops file_cfml)
+
