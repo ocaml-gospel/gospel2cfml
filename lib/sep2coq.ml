@@ -18,10 +18,19 @@ let head = "Gospel.hd_gospel"
 let tl = "Gospel.tl_gospel"
 let eq = "Coq.Init.Logic.eq"
 let app = "Coq.Lists.List.app"
-let update = "Gospel.update"
+let update = "TLC.LibContainer.update"
+let remove = "TLC.LibMap.remove_impl"
 let singleton = "Gospel.singleton"
+let mempty = "TLC.LibMap.empty_impl"
+let get = "TLC.LibMap.read_impl"
+let fmap = "TLC.LibMap.map"
+let mmem = "TLC.LibMap.index_impl"
 
-let type_mapping_list = [ ("sequence", list); ("option", option) ]
+let type_mapping_list = [
+    ("sequence", list);
+    ("option", option);
+    ("fmap", fmap);
+  ]
 
 
 let id_mapping_list =
@@ -34,9 +43,11 @@ let id_mapping_list =
     ("infix =", eq);
     ("infix ++", app);
     ("length", length);
+    ("mixfix [_]", get);
     ("mixfix [->]", update);
     ("tl", tl);
     ("singleton", singleton);
+    ("mem", mmem);
   ]
 
 let ty_map =
@@ -83,6 +94,12 @@ let rec coq_term t =
   match t.Tterm.t_node with
   | Tvar v -> coq_id v.vs_name
   | Tconst c -> coq_const c
+  | Tapp (f, [])  when f.ls_name.id_str = "mempty" ->
+     let l = match t.Tterm.t_ty with
+       |Some {ty_node=Tyapp(_, l)} -> List.map var_of_ty l
+       |_ -> assert false in
+     
+     (coq_apps (coq_at (coq_var mempty)) l)
   | Tapp (f, [t]) when
          f.ls_name.id_str = "integer_of_int" ||
            f.ls_name.id_str = "to_seq" ->
