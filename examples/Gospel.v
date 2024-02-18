@@ -1,19 +1,37 @@
 Require TLC.LibLogic.
-Require Import TLC.LibMap.
-
+Require TLC.LibMap.
+Require Import List.
 (* Lists *)
-Parameter hd_gospel : forall {A} {Inh:LibLogic.Inhab A}, list A -> A.
 
-Axiom hd_gospel_axiom :
-  forall A (x : A) l (Inh : LibLogic.Inhab A), (hd_gospel (x::l)) = x.
+Definition hd {A} {Inh:LibLogic.Inhab A} (l : list A) : A :=
+  match l with
+  |nil => TLC.LibLogic.arbitrary
+  |x::_ => x
+  end.
 
-Parameter tl_gospel : forall {A}, list A -> list A.
+Lemma hd_inst :
+  forall A (x : A) l (Inh : LibLogic.Inhab A), (hd (x::l)) = x.
+Proof. auto. Qed.
 
-Axiom tl_gospel_axiom :
-  forall A (x : A) l, tl_gospel (x::l) = l.
+Opaque hd.  
+
+Definition tl {A} (l: list A) : list A :=
+  match l with
+  |nil => nil
+  |_::t => t
+  end.
+
+Lemma tl_inst :
+  forall A (x : A) l, tl (x::l) = l.
+Proof. auto. Qed.
+
+Opaque tl.
 
 Definition singleton {A} (x : A) : list A := cons x nil.
 
-(* Maps *)
+Lemma singleton_inst :
+  forall A (x : A), singleton x = cons x nil.
+Proof. auto. Qed.
 
+Opaque singleton.
 
