@@ -4,6 +4,7 @@ open Coq
 open Formula
 open Ttypes
 open Symbols
+open Ident
 module M = Map.Make (String)
 
 let to_triple s = "_" ^ s ^ "_spec"
@@ -25,30 +26,51 @@ let mempty = "TLC.LibMap.empty_impl"
 let get = "TLC.LibMap.read_impl"
 let fmap = "TLC.LibMap.map"
 let mmem = "TLC.LibMap.index_impl"
+let cardinal = "TLC.LibSet.card_impl"
+let domain = "Gospel.domain"
+
+let append s =
+  List.map (fun (k, v) -> s ^ "." ^ k, v)
+
+let ignore_list =
+  List.map ((^) "Gospelstdlib.") [
+    "Sequence.of_list";
+    "integer_of_int";
+  ]
 
 let type_mapping_list = [
     ("sequence", list);
-    ("option", option);
-    ("fmap", fmap);
   ]
 
-
-let id_mapping_list =
-  [
-    ("Some", some);
-    ("None", none);
+let sequence_map = [
     ("empty", nil);
     ("cons", cons);
     ("hd", head);
-    ("infix =", eq);
-    ("infix ++", app);
-    ("length", length);
-    ("mixfix [_]", get);
-    ("mixfix [->]", update);
     ("tl", tl);
     ("singleton", singleton);
     ("mem", mmem);
+    ("remove", remove);
+    ("length", length);    
   ]
+
+let set_map = [
+    "cardinal", cardinal;
+  ]
+
+let map_map = [
+    "domain", domain;
+  ]
+
+let id_mapping_list =
+  [
+    ("infix =", eq);
+    ("infix ++", app);
+    ("mixfix [_]", get);
+    ("mixfix [->]", update);
+  ] @ (append "Sequence" sequence_map)
+  @ (append "Set" set_map)
+  @ (append "Map" map_map)
+
 
 let ty_map =
   List.fold_left (fun m (k, v) -> M.add k v m) M.empty type_mapping_list
@@ -56,21 +78,40 @@ let ty_map =
 let id_map =
   List.fold_left (fun m (k, v) -> M.add k v m) M.empty id_mapping_list
 
-let map_ty v = try M.find v ty_map with Not_found -> v
-let map_id v = try M.find v id_map with Not_found -> v
+let is_ignore x =
+  List.mem x ignore_list
+
+let mk_qualid name path =
+  List.fold_right (fun s1 s2 -> s1 ^ "." ^ s2) path name
+
+let map_sym map id =
+  match id.id_path with
+  |"Gospelstdlib"::t ->
+    let qualid = mk_qualid id.id_str t in 
+    M.find qualid map
+  |_ -> id.id_str
+
+let map_id id =
+  print_endline id.id_str;
+  map_sym id_map id
+
+let map_ty v =
+  print_endline v.ts_ident.id_str;
+  List.iter print_endline v.ts_ident.id_path;
+  map_sym ty_map v.ts_ident
 
 let rec var_of_ty t =
   let coq_var x = coq_var (map_ty x) in
   match t.ty_node with
-  | Tyapp (v, _) when ts_equal v ts_loc -> coq_var v.ts_ident.id_str
+  | Tyapp (v, _) when ts_equal v ts_loc -> coq_var v
   | Tyapp (v, [t1; t2]) when ts_equal v ts_arrow ->
      coq_impl (var_of_ty t1) (var_of_ty t2)
-  | Tyapp (v, l) -> coq_apps (coq_var v.ts_ident.id_str) (List.map var_of_ty l)
+  | Tyapp (v, l) -> coq_apps (coq_var v) (List.map var_of_ty l)
   | _ -> assert false
 
 exception WIP
 
-let coq_id id = coq_var (map_id id.Ident.id_str)
+let coq_id id = coq_var (map_id id)
 let gen_args vs = (vs.vs_name.id_str, var_of_ty vs.vs_ty)
 
 let gen_args_opt arg =
@@ -85,6 +126,11 @@ let rec coq_pattern p =
   | Papp (ls, l) -> coq_apps (coq_id ls.ls_name) (List.map coq_pattern l)
   | Por _ | Pas _ | Pinterval _ | Pconst _ -> assert false
 
+let var_of_pat p = match p.Tterm.p_node with
+  |Pvar vs -> vs.vs_name.id_str, (var_of_ty vs.vs_ty)
+  |Pwild -> "_", coq_typ_type
+  |_ -> assert false
+
 let coq_const c =
   match c with
   | Ppxlib.Pconst_integer (v, _) -> coq_int (int_of_string v)
@@ -97,16 +143,20 @@ let rec coq_term t =
   | Tapp (f, [])  when f.ls_name.id_str = "mempty" ->
      let l = match t.Tterm.t_ty with
        |Some {ty_node=Tyapp(_, l)} -> List.map var_of_ty l
-       |_ -> assert false in
-     
+       |_ -> assert false in     
      (coq_apps (coq_at (coq_var mempty)) l)
   | Tapp (f, [t]) when
-         f.ls_name.id_str = "integer_of_int" ||
-           f.ls_name.id_str = "to_seq" ->
+         is_ignore (mk_qualid f.ls_name.id_str f.ls_name.id_path) ->
      coq_term t
   | Tapp (f, [t1; t2])
        when f.ls_name.id_str = "apply" ->
      coq_app (coq_term t1) (coq_term t2)
+  | Tapp (f, [t1; t2])
+       when f.ls_name.id_str = "remove" ->
+     let singleton_set = coq_var "TLC.LibSet.single_impl" in
+     let set = coq_app singleton_set (coq_term t2) in
+     let var = coq_id f.ls_name in
+     coq_apps var [coq_term t1; set]
   | Tapp (f, args) ->
      let var = coq_id f.ls_name in
      coq_apps var (List.map coq_term args)
@@ -119,7 +169,8 @@ let rec coq_term t =
      let f = match q with |Tforall -> coq_foralls |Texists -> coq_exists in
      let ids = List.map gen_args ids in
      f ids (coq_term t)
-  | Tlambda _ -> assert false
+  | Tlambda(vl, t) ->
+     coq_funs (List.map var_of_pat vl) (coq_term t)
   | Tlet (vs, t1, t2) ->
      let id = coq_id vs.vs_name in
      Coq_lettuple([id], coq_term t1, coq_term t2)

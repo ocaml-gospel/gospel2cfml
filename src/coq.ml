@@ -360,7 +360,6 @@ let coq_annot (term : coq) (term_type : coq) = Coq_annot (term, term_type)
 (** Function [fun (x:t) => c] where [arg] is the pair [(x,t)] *)
 
 let coq_fun arg c = Coq_fun (arg, c)
-
 (** Function [fun (x1:T1) .. (xn:Tn) => c] *)
 
 (** Recursive function [fix f (x1:T1) .. (xn:Tn) : Tr => c] represented as
