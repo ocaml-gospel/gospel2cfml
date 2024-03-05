@@ -15,31 +15,46 @@ let cons = "Coq.Lists.List.cons"
 let list = "Coq.Lists.List.list"
 let option = "Coq.Init.Datatypes.option"
 let length = "LibListZ.length"
-let head = "Gospel.hd_gospel"
-let tl = "Gospel.tl_gospel"
+let head = "Gospel.hd"
+let tl = "Gospel.tl"
 let eq = "Coq.Init.Logic.eq"
 let app = "Coq.Lists.List.app"
-let update = "TLC.LibContainer.update"
+let update = "Gospel.update"
 let remove = "TLC.LibMap.remove_impl"
-let singleton = "Gospel.singleton"
+let singleton_seq = "Gospel.singleton"
 let mempty = "TLC.LibMap.empty_impl"
 let get = "TLC.LibMap.read_impl"
 let fmap = "TLC.LibMap.map"
 let mmem = "TLC.LibMap.index_impl"
 let cardinal = "TLC.LibSet.card_impl"
+let singleton_set = "TLC.LibSet.single_impl"
 let domain = "Gospel.domain"
+let int = "Coq.Numbers.BinNums.Z"
+let ge = "TLC.LibOrder.ge"
+let gt = "TLC.LibOrder.gt"
+let le = "TLC.LibOrder.le"
+let lt = "TLC.LibOrder.lt"
+let int_rep = "Gospel.Int"
+let option_rep = "Gospel.Option"
+let set="TLC.LibSet.set"
+let empty_set="TLC.LibSet.empty_impl"
+let add_set="Gospel.add_set"
+let remove_set="TLC.LibSet.remove_impl"
 
 let append s =
   List.map (fun (k, v) -> s ^ "." ^ k, v)
 
 let ignore_list =
   List.map ((^) "Gospelstdlib.") [
-    "Sequence.of_list";
-    "integer_of_int";
+      "Sequence.of_list";
+      "List.to_sequence";
+      
   ]
 
 let type_mapping_list = [
     ("sequence", list);
+    ("integer", int);
+    ("set", set);
   ]
 
 let sequence_map = [
@@ -47,18 +62,25 @@ let sequence_map = [
     ("cons", cons);
     ("hd", head);
     ("tl", tl);
-    ("singleton", singleton);
+    ("singleton", singleton_seq);
     ("mem", mmem);
     ("remove", remove);
     ("length", length);    
   ]
 
-let set_map = [
+let set_map = [    
     "cardinal", cardinal;
+    "singleton", singleton_set;
+    "add", add_set;
+    "remove", remove_set;
   ]
 
 let map_map = [
     "domain", domain;
+  ]
+
+let sys_map = [
+    "word_size", "Gospel.word_size"
   ]
 
 let id_mapping_list =
@@ -67,10 +89,16 @@ let id_mapping_list =
     ("infix ++", app);
     ("mixfix [_]", get);
     ("mixfix [->]", update);
+    "infix >=", ge;
+    "infix >", gt;
+    "infix <=", le;
+    "infix <", lt;
+    "Option", option_rep;
+    "Int", int_rep;
   ] @ (append "Sequence" sequence_map)
   @ (append "Set" set_map)
   @ (append "Map" map_map)
-
+  @ (append "Sys" sys_map)
 
 let ty_map =
   List.fold_left (fun m (k, v) -> M.add k v m) M.empty type_mapping_list
@@ -86,18 +114,16 @@ let mk_qualid name path =
 
 let map_sym map id =
   match id.id_path with
-  |"Gospelstdlib"::t ->
-    let qualid = mk_qualid id.id_str t in 
-    M.find qualid map
+  |"Gospelstdlib"::t | "#Base_lang"::t  ->
+    let qualid = mk_qualid id.id_str t in
+    begin try M.find qualid map with
+    |Not_found -> id.id_str end
   |_ -> id.id_str
 
 let map_id id =
-  print_endline id.id_str;
   map_sym id_map id
 
 let map_ty v =
-  print_endline v.ts_ident.id_str;
-  List.iter print_endline v.ts_ident.id_path;
   map_sym ty_map v.ts_ident
 
 let rec var_of_ty t =
@@ -121,14 +147,14 @@ let gen_args_opt arg =
 
 let rec coq_pattern p =
   match p.Tterm.p_node with
-  | Pwild -> Coq_wild
+  | Pwild -> Coq_wild 
   | Pvar vs -> coq_id vs.vs_name
   | Papp (ls, l) -> coq_apps (coq_id ls.ls_name) (List.map coq_pattern l)
   | Por _ | Pas _ | Pinterval _ | Pconst _ -> assert false
 
 let var_of_pat p = match p.Tterm.p_node with
   |Pvar vs -> vs.vs_name.id_str, (var_of_ty vs.vs_ty)
-  |Pwild -> "_", coq_typ_type
+  |Pwild -> "_", var_of_ty p.p_ty
   |_ -> assert false
 
 let coq_const c =
@@ -140,11 +166,6 @@ let rec coq_term t =
   match t.Tterm.t_node with
   | Tvar v -> coq_id v.vs_name
   | Tconst c -> coq_const c
-  | Tapp (f, [])  when f.ls_name.id_str = "mempty" ->
-     let l = match t.Tterm.t_ty with
-       |Some {ty_node=Tyapp(_, l)} -> List.map var_of_ty l
-       |_ -> assert false in     
-     (coq_apps (coq_at (coq_var mempty)) l)
   | Tapp (f, [t]) when
          is_ignore (mk_qualid f.ls_name.id_str f.ls_name.id_path) ->
      coq_term t
@@ -152,11 +173,12 @@ let rec coq_term t =
        when f.ls_name.id_str = "apply" ->
      coq_app (coq_term t1) (coq_term t2)
   | Tapp (f, [t1; t2])
-       when f.ls_name.id_str = "remove" ->
+       when f.ls_name.id_str = "remove"
+            && f.ls_name.id_path = ["Gospelstdlib"; "Set"] ->
      let singleton_set = coq_var "TLC.LibSet.single_impl" in
-     let set = coq_app singleton_set (coq_term t2) in
+     let set = coq_app singleton_set (coq_term t1) in
      let var = coq_id f.ls_name in
-     coq_apps var [coq_term t1; set]
+     coq_apps var [coq_term t2; set]
   | Tapp (f, args) ->
      let var = coq_id f.ls_name in
      coq_apps var (List.map coq_term args)
@@ -220,19 +242,39 @@ let gen_spec triple =
   let triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
   coq_foralls all_vars triple
 
+let mk_enc = (^) "_E"
+
 let sep_def d =
   match d.d_node with
-  | Type (id, m, _) -> if m then [] else [ Coqtop_param (id.id_str, Coq_type) ]
+  | Type (id, _) -> [
+      Coqtop_param (id.id_str, Coq_type);
+      Coqtop_context [mk_enc id.id_str, enc_type (coq_var id.id_str)]
+    ]
   | Pred (id, args) ->
-      let args = List.rev args in
-      let types = List.map (fun v -> var_of_ty v.vs_ty) args in
-      let t = coq_impls types hprop in
-      [ Coqtop_param (id.id_str, t) ]
+     let args = List.rev args in
+     let types = List.map (fun v -> var_of_ty v.vs_ty) args in
+     let t = coq_impls types hprop in
+     [ Coqtop_param (id.id_str, t) ]
   | Triple triple ->
-      let fun_def = (triple.triple_name.id_str, Formula.func_type) in
-      let fun_triple = gen_spec triple in
-      let triple_name = to_triple triple.triple_name.id_str in
-      coqtop_params [ fun_def; (triple_name, fun_triple) ]
+     let fun_def = (triple.triple_name.id_str, Formula.func_type) in
+     let fun_triple = gen_spec triple in
+     let triple_name = to_triple triple.triple_name.id_str in
+     coqtop_params [ fun_def; (triple_name, fun_triple) ]
+  | Function f ->
+     let name = f.fun_ls.ls_name.id_str in
+     let args = f.fun_params in
+     let ret = f.fun_ls.ls_value in
+     let ret_coq = Option.fold ret ~some:var_of_ty ~none:coq_typ_prop in 
+     let args_coq = List.map (fun arg -> arg.vs_name.id_str, var_of_ty arg.vs_ty) args in
+     let def = Option.map coq_term f.fun_def in
+     begin match def with
+     |Some d -> 
+       let coq_def = name, args_coq, ret_coq, d in 
+       if f.fun_rec then
+         [coqtop_fixdef coq_def]
+       else
+         [coqtop_fundef coq_def]
+     |None -> coqtop_params [name, coq_impls (List.map snd args_coq) ret_coq] end
   | _ -> []
 
 let sep_defs l =
