@@ -41,7 +41,7 @@ let type_check load_path name sigs =
   let penv =
      Utils.Sstr.singleton mn |> Typing.penv load_path
   in
-  let md = List.fold_left (Typing.type_sig_item [mn] penv) md sigs in
+  let md = List.fold_left (Typing.type_sig_item penv) md sigs in
   wrap_up_muc md
 
 let () =
@@ -54,7 +54,13 @@ let () =
   let file_sep = Tast2sep.process_sigs file in
   let file_cfml = Sep2coq.sep_defs file_sep in
   let out_fname = base_fname fname ^ "_mli.v" in
-  let directory = "/home/tiago/doc/cfml/examples/translations/" ^ (String.capitalize_ascii (base_fname fname)) ^ "/" ^ out_fname in
+  let base_dir =
+    "/home/tiago/doc/cfml/examples/translations/"
+    ^ (String.capitalize_ascii (base_fname fname)) in
+  let () = if not (Sys.file_exists base_dir) then
+    Sys.mkdir base_dir 0o755 else () in 
+  let directory = base_dir ^ "/" ^ out_fname in
+  
   let fmt = formatter_of_out_channel (open_out directory) in
   fprintf fmt "%s@." (Print_coq.tops file_cfml)
 
