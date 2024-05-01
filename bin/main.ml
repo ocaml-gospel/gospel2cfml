@@ -55,7 +55,7 @@ let () =
   let file_cfml = Sep2coq.sep_defs file_sep in
   let out_fname = base_fname fname ^ "_mli.v" in
   let base_dir =
-    "/home/tiago/doc/cfml/examples/translations/"
+    "/home/tiago/phd/cfml/examples/translations/"
     ^ (String.capitalize_ascii (base_fname fname)) in
   let () = if not (Sys.file_exists base_dir) then
     Sys.mkdir base_dir 0o755 else () in 

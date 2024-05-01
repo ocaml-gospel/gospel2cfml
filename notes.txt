@@ -1,0 +1,28 @@
+translating bools into props:
+
+All gospel booleans are transformed into props. To handle this, the
+following transformations are made:
+
+- if ... then ... else expressions are turned into the classical If
+  function in TLC's standard library.
+
+- e1 = e2 expressions are turned into e1 <-> e2 when e1's type is
+  bool.
+
+- gospel's logical operators are mapped into Coq's logical operators.
+
+- gospel's true and false constants are turned into Coq's True and
+  False.
+
+- ocaml functions that take as parameters or return bools still remain
+  with the same type, however these are explicitly
+  coerced into Props within the specs.
+
+- all type and function definitions that use bool now use Prop.
+
+- match e with ... where e is a boolean are translated into 
+
+Limitations:
+- The main limitation is in regards with equality. In general, we
+would like to substitute the = operator with <->. Generally however,
+this cannot be done. 

@@ -4,7 +4,6 @@ open Coq
 open Formula
 open Ttypes
 open Symbols
-open Ident
 open Coq_driver
 module M = Map.Make (String)
 
@@ -23,7 +22,7 @@ let mk_qualid name path =
   List.fold_right (fun s1 s2 -> s1 ^ "." ^ s2) path name
 
 let map_sym map id =
-  match id.id_path with
+  match id.Ident.id_path with
   |"Gospelstdlib"::t | "#Base_lang"::t  ->
     let qualid = mk_qualid id.id_str t in
     begin try M.find qualid map with
@@ -36,6 +35,8 @@ let map_id id =
 let map_ty v =
   map_sym ty_map v.ts_ident
 
+let to_type = String.capitalize_ascii
+
 let var_of_ty ?(b2p=true) t =
   let rec var_of_ty t = 
     let coq_var x = coq_var (map_ty x) in
@@ -46,7 +47,7 @@ let var_of_ty ?(b2p=true) t =
     | Tyapp(v, []) when b2p && ts_equal v ts_bool ->
        coq_typ_prop
     | Tyapp (v, l) -> coq_apps (coq_var v) (List.map var_of_ty l)
-    | _ -> assert false in
+    | Tyvar tv -> Coq_var (to_type tv.tv_name.id_str) in
   var_of_ty t
 
 exception WIP
@@ -97,12 +98,14 @@ let rec coq_term t =
      let set = coq_app singleton_set (coq_term t1) in
      let var = coq_id f.ls_name in
      coq_apps var [coq_term t2; set]
-  | Tapp (f, [t1; t2]) when
+  | Tapp (f, t1::t) when
          ls_equal f ps_equ &&
            ty_equal t1.t_ty ty_bool ->
      let ct1 = coq_term t1 in
-     let ct2 = coq_term t2 in
-     coq_apps (coq_var "Coq.Init.Logic.iff") [ct1; ct2]
+     let arg_maybe = List.map coq_term t in 
+     coq_apps (coq_var "Coq.Init.Logic.iff") (ct1::arg_maybe)
+  | Tapp (f, []) when ls_equal f ps_equ  ->
+     coq_var "Gospel.eq"
   | Tapp (f, []) when (ls_equal f fs_bool_true)  ->
      coq_prop_true
   | Tapp (f, []) when (ls_equal f fs_bool_false)  ->
@@ -179,6 +182,13 @@ let gen_spec triple =
 
 let mk_enc = (^) "_E"
 
+let get_poly args =
+  let rec get_poly ty = match ty.ty_node with
+    |Tyvar v -> [v.tv_name.id_str]
+    |Tyapp (_, l) -> List.concat_map get_poly l in
+  List.concat_map (fun v -> get_poly v.vs_ty) args
+  |> List.sort_uniq compare
+
 let sep_def d =
   match d.d_node with
   | Type (id, _) -> [
@@ -187,11 +197,14 @@ let sep_def d =
     ]
   | Pred (id, args) ->
      let args = List.rev args in
+     let poly = get_poly args in
      let types = List.map (fun v -> var_of_ty v.vs_ty) args in
      let t = coq_impls types hprop in
-     [ Coqtop_param (id.id_str, t) ]
+     let typed_var v = "{" ^ String.capitalize_ascii v, Coq_var "Type}" in
+     let with_poly = coq_foralls (List.map typed_var poly) t in
+     [ Coqtop_param (id.id_str, with_poly) ]
   | Triple triple ->
-     let fun_def = (triple.triple_name.id_str, Formula.func_type) in
+     let fun_def = triple.triple_name.id_str, Formula.func_type in
      let fun_triple = gen_spec triple in
      let triple_name = to_triple triple.triple_name.id_str in
      coqtop_params [ fun_def; (triple_name, fun_triple) ]
