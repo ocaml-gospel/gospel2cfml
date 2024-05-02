@@ -77,11 +77,28 @@ let coq_const c =
   | Ppxlib.Pconst_integer (v, _) -> coq_int (int_of_string v)
   | _ -> assert false
 
-let to_prop_case t l =
-  let t = coq_app (coq_var "Gospel.bool_of_prop") t in
-  coq_match t l
+let rec get_aliases p = match p.Tterm.p_node with
+  | Pwild | Papp _ -> []
+  | Pvar vs -> [coq_id vs.vs_name]
+  | Pas (p1, v) -> (coq_id v.vs_name) :: (get_aliases p1)
+  | Por _ | Pconst _ | Pinterval _-> assert false
 
-let rec coq_term t =
+let rec case (p, _, t) = coq_pattern p, coq_term t
+and bool_case al p t =
+  let t = coq_term t in
+  let eq_true x = coq_apps (Coq_var "Coq.Init.Logic.eq") [coq_bool_true; x] in
+  coq_pattern p, Coq_lettuple(al, coq_tuple (List.map eq_true al), t)
+
+and to_prop_case t l =
+  let bop = coq_var "Gospel.bool_of_prop" in
+  let t = coq_app bop t in
+  let branches =
+    List.map (fun (p, g, t) ->
+        let al = get_aliases p in
+        if al = [] then case (p, g, t) else bool_case al p t) l in 
+  coq_match t branches
+
+and coq_term t =
   match t.Tterm.t_node with
   | Tvar v -> coq_id v.vs_name
   | Tconst c -> coq_const c
@@ -104,12 +121,10 @@ let rec coq_term t =
      let ct1 = coq_term t1 in
      let arg_maybe = List.map coq_term t in 
      coq_apps (coq_var "Coq.Init.Logic.iff") (ct1::arg_maybe)
-  | Tapp (f, []) when ls_equal f ps_equ  ->
-     coq_var "Gospel.eq"
   | Tapp (f, []) when (ls_equal f fs_bool_true)  ->
      coq_prop_true
   | Tapp (f, []) when (ls_equal f fs_bool_false)  ->
-     coq_prop_true
+     coq_prop_false
   | Tapp (f, args) ->
      let var = coq_id f.ls_name in
      coq_apps var (List.map coq_term args)
@@ -121,12 +136,10 @@ let rec coq_term t =
      coq_if_prop gc thc elc
   | Tcase (t, l) ->
      let e = (coq_term t) in 
-     let case (p, _, t) = (coq_pattern p, coq_term t) in
-     let branches = List.map case l in
      if ty_equal t.t_ty ty_bool then
-       to_prop_case e branches
+       to_prop_case e l
      else
-       coq_match e branches
+       coq_match e (List.map case l)
   | Tquant(q, ids, t) ->
      let f = match q with |Tforall -> coq_foralls |Texists -> coq_exists in
      let ids = List.map gen_args ids in
@@ -161,6 +174,7 @@ let rec cfml_term = function
         (fun v acc -> hexists v.vs_name.id_str (var_of_ty v.vs_ty) acc)
         l coq_term
   | _ -> assert false
+
 
 let gen_spec triple =
   let args = List.map gen_args_opt triple.triple_args in
@@ -223,7 +237,8 @@ let sep_def d =
        else
          [coqtop_fundef coq_def]
      |None -> coqtop_params [name, coq_impls (List.map snd args_coq) ret_coq] end
-  | _ -> []
+  | Axiom a ->
+     coqtop_params [a.ax_name.id_str, coq_term a.ax_term]
 
 let sep_defs l =
   let cfml = List.map (fun s -> "CFML." ^ s) in
@@ -254,7 +269,8 @@ let sep_defs l =
       Coqtop_require
         (cfml [ "Stdlib.Array_ml"; "Stdlib.List_ml"; "Stdlib.Sys_ml" ]);
       Coqtop_require_import
-        [ "Coq.ZArith.BinIntDef"; "CFML.Semantics"; "CFML.WPHeader" ];
+        [ "Coq.ZArith.BinIntDef"; "CFML.Semantics"; "CFML.WPHeader";
+        ];
       Coqtop_custom "Delimit Scope Z_scope with Z."
       (*Coqtop_custom "Existing Instance WPHeader.Enc_any | 99."*);
     ]
