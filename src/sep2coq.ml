@@ -198,7 +198,7 @@ let mk_enc = (^) "_E"
 
 let get_poly args =
   let rec get_poly ty = match ty.ty_node with
-    |Tyvar v -> [v.tv_name.id_str]
+    |Tyvar v -> [String.capitalize_ascii v.tv_name.id_str]
     |Tyapp (_, l) -> List.concat_map get_poly l in
   List.concat_map (fun v -> get_poly v.vs_ty) args
   |> List.sort_uniq compare
@@ -214,8 +214,7 @@ let sep_def d =
      let poly = get_poly args in
      let types = List.map (fun v -> var_of_ty v.vs_ty) args in
      let t = coq_impls types hprop in
-     let typed_var v = "{" ^ String.capitalize_ascii v, Coq_var "Type}" in
-     let with_poly = coq_foralls (List.map typed_var poly) t in
+     let with_poly = coq_foralls (coq_types poly) t in
      [ Coqtop_param (id.id_str, with_poly) ]
   | Triple triple ->
      let fun_def = triple.triple_name.id_str, Formula.func_type in
