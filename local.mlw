@@ -1,0 +1,70 @@
+use ref.Ref
+use int.Int
+use list.List
+
+type arrow 'a 'b
+type closure 'a 'b 'state = {
+  f : arrow 'a 'b; 
+  mutable state : 'state
+}
+
+predicate post (k : arrow 'a 'b) (arg : 'a) 
+               (old_state : 'state) (state : 'state) (result : 'b) 
+
+val apply (k : closure 'a 'b 'state) (arg : 'a) : 'b
+  ensures{post k.f arg (old k.state) k.state result}
+  writes{k.state}
+
+val predicate write_int (k : arrow 'a 'b) (old_n : int) (n : int) 
+
+(*let f = 
+   let r = ref 0 in 
+   let f = fun () -> r := !r + 1 in 
+   r := 3; f
+*)
+
+
+let inc = 
+  let r = ref 0 in
+  
+  val apply (k : closure 'a 'b 'state) (arg : 'a) : 'b
+  ensures{post k.f arg (old k.state) k.state result}
+  ensures{write_int k.f (old !r) !r}
+  writes{k.state}
+  writes{r} in 
+    
+  val k : closure unit int int
+  ensures{
+    let k = result in
+    forall arg old_state state result.
+    post k.f arg old_state state result ->
+    let old_r = old_state in
+    let r = state in
+    r = old_r + 1
+  }
+  ensures{
+    let k = result in
+    forall arg old_state state result.
+    post k.f arg old_state state result ->
+    let old_r = old_state in
+    let r = state in
+    result = r
+  }
+  ensures{
+    let k = result in
+    forall old_r r.
+    write_int k.f old_r r ->
+    old_r + 1 = r
+  }
+  ensures {
+    let k = result in 
+    k.state = !r} in 
+  let res = apply k () in 
+  assert {res= 1};
+  assert {!r = 1}; 
+  let res = apply k () in 
+  assert {res = 2};
+  r := 1;
+  k
+  
+  

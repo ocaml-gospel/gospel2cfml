@@ -1,76 +1,76 @@
 (*@ open Sequence *)
 
-type t
-(*@ mutable model : int Sequence.t *)
+type 'a t
+(*@ mutable model : 'a Sequence.t *)
 
-val create : unit -> t
+val create : unit -> 'a t
 (*@ q = create ()
-    produces q @ t
+    produces q @ 'a t
     ensures q = empty
 *)
 
-val push : t -> int -> unit
+val push : 'a t -> 'a -> unit
 (*@ push q x
-    modifies q @ t
+    modifies q @ 'a t
     ensures q = cons x (old q)
 *)
 
-val pop_opt : t -> int option
+val pop_opt : 'a t -> 'a option
 (*@ r = pop_opt q
-    consumes q @ t
-    produces q @ t
+    consumes q @ 'a t
+    produces q @ 'a t
 
     ensures match r with
     |None -> old q = empty && q = empty
     |Some r_val -> old q = cons r_val q
 *)
 
-val top_opt : t -> int option
+val top_opt : 'a t -> 'a option
 (*@ r = top_opt q
-    preserves q @ t
+    preserves q @ 'a t
 
     ensures match r with
     |None -> q = empty
     |Some r -> q <> empty && r = hd q
 *)
 
-val clear : t -> unit
+val clear : 'a t -> unit
 (*@ clear q
-    consumes q @ t
-    produces q @ t
+    consumes q @ 'a t
+    produces q @ 'a t
     ensures q = empty *)
 
-val copy : t -> t
+val copy : 'a t -> 'a t
 (*@ q2 = copy q1
-    preserves q1 @ t
-    produces q2 @ t
+    preserves q1 @ 'a t
+    produces q2 @ 'a t
     ensures q2 = q1
 *)
 
-val is_empty : t -> bool
+val is_empty : 'a t -> bool
 (*@ b = is_empty q
-    preserves q @ t
+    preserves q @ 'a t
     ensures b <-> q = empty *)
 
-val length : t -> int
+val length : 'a t -> int
 (*@ l = length q
-    preserves q @ t
+    preserves q @ 'a t
     ensures Sequence.length q = l *)
 
-val transfer : t -> t -> unit
+val transfer : 'a t -> 'a t -> unit
 (*@ transfer q1 q2
-    produces q1 @ t
-    produces q2 @ t
-    consumes q1 @ t
-    consumes q2 @ t
+    produces q1 @ 'a t
+    produces q2 @ 'a t
+    consumes q1 @ 'a t
+    consumes q2 @ 'a t
 
     ensures q1 = empty
     ensures q2 = old (q2 ++ q1) *)
 
-(*missing : pop, take, iter, fold, to_seq, add_seq, of_seq *)
+(*missing : pop, 'a take, iter, fold, 'a to_seq, add_seq, of_seq *)
 
-(* predicate is_eq (A : type) 
-(* this predicate does not hold for unwoned mutable structures and functions*)
+(* predicate is_eq (A : 'a type) 
+(* 'a this predicate does not hold for unwoned mutable structures and functions*)
 
 val st_eq : 'a -> 'a -> bool
 (* b = st_eq x y
@@ -78,7 +78,7 @@ val st_eq : 'a -> 'a -> bool
     ensures b <-> x = y
  *)
 
-(* predicate unowned (A : type) *)
+(* predicate unowned (A : 'a type) *)
 
 
 
@@ -93,7 +93,7 @@ val ph_eq : 'a -> 'a -> bool
 
 { [is_loc x && is_loc y] } ph_eq x y {[x = y]}
 
- predicates over types, type classes *)
+ predicates over 'a types, 'a type classes *)
 (* increase clarity in spatial specs
    adressable vs unowned *)
  *)

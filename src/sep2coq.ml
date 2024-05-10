@@ -175,33 +175,33 @@ let rec cfml_term = function
         l coq_term
   | _ -> assert false
 
-
-let gen_spec triple =
-  let args = List.map gen_args_opt triple.triple_args in
-  let all_vars = List.map gen_args triple.triple_vars in
-  let dynargs = List.map (fun (x, t) -> coq_dyn_of t (coq_var x)) args in
-  let trm = trm_apps_lifted (coq_var triple.triple_name.id_str) dynargs in
-  let pre = cfml_term triple.triple_pre in
-  let post =
-    let args, body =
-      match triple.triple_post with
-      | Lambda (args, b) ->
-          (List.map (fun v -> (v.vs_name.id_str, var_of_ty ~b2p:false v.vs_ty)) args, b)
-      | b -> ([ ("_", coq_typ_unit) ], b)
-    in
-    coq_funs args (cfml_term body)
-  in
-  let triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
-  coq_foralls all_vars triple
-
-let mk_enc = (^) "_E"
-
 let get_poly args =
   let rec get_poly ty = match ty.ty_node with
     |Tyvar v -> [String.capitalize_ascii v.tv_name.id_str]
     |Tyapp (_, l) -> List.concat_map get_poly l in
   List.concat_map (fun v -> get_poly v.vs_ty) args
   |> List.sort_uniq compare
+
+let gen_spec triple =
+  let poly_vars = get_poly triple.triple_vars in
+  let args = List.map gen_args_opt triple.triple_args in
+  let all_vars = List.map gen_args triple.triple_vars in
+  let dynargs = List.map (fun (x, t) -> coq_dyn_of t (coq_var x)) args in
+  let trm = trm_apps_lifted (coq_var triple.triple_name.id_str) dynargs in
+  let pre = cfml_term triple.triple_pre in
+  let args, body, poly_ret =
+    match triple.triple_post with
+    | Lambda (args, b) ->
+       let f v = v.vs_name.id_str, var_of_ty ~b2p:false v.vs_ty in
+       List.map f args, b, get_poly args
+    | b -> [ ("_", coq_typ_unit) ], b, [] in
+  let post = coq_funs args (cfml_term body) in
+  let triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
+  let triple_vars = coq_foralls all_vars triple in
+  let triple_ret = coq_foralls (coq_types poly_ret) triple_vars in
+  coq_foralls (coq_types poly_vars) triple_ret
+
+let mk_enc = (^) "_E"
 
 let sep_def d =
   match d.d_node with
