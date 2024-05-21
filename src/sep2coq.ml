@@ -189,13 +189,13 @@ let gen_spec triple =
   let dynargs = List.map (fun (x, t) -> coq_dyn_of t (coq_var x)) args in
   let trm = trm_apps_lifted (coq_var triple.triple_name.id_str) dynargs in
   let pre = cfml_term triple.triple_pre in
-  let args, body, poly_ret =
-    match triple.triple_post with
-    | Lambda (args, b) ->
+  let rets, poly_ret =
+    match triple.triple_rets with
+    | [] -> [ ("_", coq_typ_unit) ], [] 
+    | rets ->
        let f v = v.vs_name.id_str, var_of_ty ~b2p:false v.vs_ty in
-       List.map f args, b, get_poly args
-    | b -> [ ("_", coq_typ_unit) ], b, [] in
-  let post = coq_funs args (cfml_term body) in
+       List.map f rets, get_poly rets in 
+  let post = coq_funs rets (cfml_term triple.triple_post) in
   let triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
   let triple_vars = coq_foralls all_vars triple in
   let triple_ret = coq_foralls (coq_types poly_ret) triple_vars in
