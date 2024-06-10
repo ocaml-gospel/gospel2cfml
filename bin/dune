@@ -1,4 +1,5 @@
 (executable
  (public_name gospel2cfml)
+ (modes exe byte)
  (name main)
  (libraries gospel pprint gospel2cfml))

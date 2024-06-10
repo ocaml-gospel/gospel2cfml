@@ -21,13 +21,38 @@ let is_ignore x =
 let mk_qualid name path =
   List.fold_right (fun s1 s2 -> s1 ^ "." ^ s2) path name
 
+let id_mapper = function
+  |"prefix -" -> "neg"
+  |"infix +" -> "add"
+  |"infix -" -> "minus"
+  |"infix *" -> "mult"
+  |"infix /" -> "div"
+  |"infix >" -> "gt"
+  |"infix >=" -> "ge"
+  |"infix <" -> "lt"
+  |"infix <=" -> "le"
+  |"infix ++" -> "app"
+  |"mixfix [_]" -> "seq_get"
+  |"mixfix [_.._]" -> "seq_sub"
+  |"mixfix [_..]" -> "seq_sub_l"
+  |"mixfix [.._]" -> "seq_sub_r"
+  |"mixfix [->]" -> "map_set"
+  |s -> s
+
+let coq_keywords = ["mod"; "Set"]
+
+let valid_coq_id s =
+  if List.mem s coq_keywords
+  then "_" ^ s
+  else id_mapper s
+
 let map_sym map id =
   match id.Ident.id_path with
-  |"Gospelstdlib"::t | "#Base_lang"::t  ->
-    let qualid = mk_qualid id.id_str t in
-    begin try M.find qualid map with
-    |Not_found -> id.id_str end
-  |_ -> id.id_str
+  (*| "Gospelstdlib"::t *) | "#Base_lang"::t  ->
+                              let qualid = mk_qualid id.id_str t in
+                              begin try M.find qualid map with
+                                    |Not_found -> id.id_str end
+  |_ -> valid_coq_id id.id_str
 
 let map_id id =
   map_sym id_map id
@@ -47,7 +72,8 @@ let var_of_ty ?(b2p=true) t =
     | Tyapp(v, []) when b2p && ts_equal v ts_bool ->
        coq_typ_prop
     | Tyapp (v, l) -> coq_apps (coq_var v) (List.map var_of_ty l)
-    | Tyvar tv -> Coq_var (to_type tv.tv_name.id_str) in
+    | Tyvar tv ->
+       Coq_var (to_type tv.tv_name.id_str) in
   var_of_ty t
 
 exception WIP
@@ -68,8 +94,8 @@ let rec coq_pattern p =
   | Por _ | Pas _ | Pinterval _ | Pconst _ -> assert false
 
 let var_of_pat p = match p.Tterm.p_node with
-  |Pvar vs -> vs.vs_name.id_str, (var_of_ty vs.vs_ty)
-  |Pwild -> "_", var_of_ty p.p_ty
+  | Pvar vs -> vs.vs_name.id_str, (var_of_ty vs.vs_ty)
+  | Pwild -> "_", var_of_ty p.p_ty
   |_ -> assert false
 
 let coq_const c =
@@ -83,14 +109,25 @@ let rec get_aliases p = match p.Tterm.p_node with
   | Pas (p1, v) -> (coq_id v.vs_name) :: (get_aliases p1)
   | Por _ | Pconst _ | Pinterval _-> assert false
 
+let rec get_poly ty = match ty.ty_node with
+  |Tyvar v ->  [String.capitalize_ascii v.tv_name.id_str]
+  |Tyapp (_, l) -> List.concat_map get_poly l
+
+let get_poly_list args =
+  List.concat_map (fun t -> get_poly t) args
+  |> List.sort_uniq compare
+
+let get_vs_poly args =
+  get_poly_list (List.map (fun x -> x.vs_ty) args)
+
 let rec case (p, _, t) = coq_pattern p, coq_term t
 and bool_case al p t =
   let t = coq_term t in
-  let eq_true x = coq_apps (Coq_var "Coq.Init.Logic.eq") [coq_bool_true; x] in
+  let eq_true x = coq_app (Coq_var "Gospel.bool_to_prop") x in
   coq_pattern p, Coq_lettuple(al, coq_tuple (List.map eq_true al), t)
 
 and to_prop_case t l =
-  let bop = coq_var "Gospel.bool_of_prop" in
+  let bop = coq_var "Gospel.prop_to_bool" in
   let t = coq_app bop t in
   let branches =
     List.map (fun (p, g, t) ->
@@ -98,147 +135,164 @@ and to_prop_case t l =
         if al = [] then case (p, g, t) else bool_case al p t) l in 
   coq_match t branches
 
-and coq_term t =
-  match t.Tterm.t_node with
-  | Tvar v -> coq_id v.vs_name
-  | Tconst c -> coq_const c
-  | Tapp (f, [t]) when
-         is_ignore (mk_qualid f.ls_name.id_str f.ls_name.id_path) ->
-     coq_term t
-  | Tapp (f, [t1; t2])
-       when f.ls_name.id_str = "apply" ->
-     coq_app (coq_term t1) (coq_term t2)
-  | Tapp (f, [t1; t2])
-       when f.ls_name.id_str = "remove"
-            && f.ls_name.id_path = ["Gospelstdlib"; "Set"] ->
-     let singleton_set = coq_var "TLC.LibSet.single_impl" in
-     let set = coq_app singleton_set (coq_term t1) in
-     let var = coq_id f.ls_name in
-     coq_apps var [coq_term t2; set]
-  | Tapp (f, t1::t) when
-         ls_equal f ps_equ &&
-           ty_equal t1.t_ty ty_bool ->
-     let ct1 = coq_term t1 in
-     let arg_maybe = List.map coq_term t in 
-     coq_apps (coq_var "Coq.Init.Logic.iff") (ct1::arg_maybe)
-  | Tapp (f, []) when (ls_equal f fs_bool_true)  ->
-     coq_prop_true
-  | Tapp (f, []) when (ls_equal f fs_bool_false)  ->
-     coq_prop_false
-  | Tapp (f, args) ->
-     let var = coq_id f.ls_name in
-     coq_apps var (List.map coq_term args)
-  | Tfield _ -> assert false
-  | Tif(g, th, el) ->
-     let gc = coq_term g in
-     let thc = coq_term th in
-     let elc = coq_term el in
-     coq_if_prop gc thc elc
-  | Tcase (t, l) ->
-     let e = (coq_term t) in 
-     if ty_equal t.t_ty ty_bool then
-       to_prop_case e l
-     else
-       coq_match e (List.map case l)
-  | Tquant(q, ids, t) ->
-     let f = match q with |Tforall -> coq_foralls |Texists -> coq_exists in
-     let ids = List.map gen_args ids in
-     f ids (coq_term t)
-  | Tlambda(vl, t) ->
-     coq_funs (List.map var_of_pat vl) (coq_term t)
-  | Tlet (vs, t1, t2) ->
-     let id = coq_id vs.vs_name in
-     Coq_lettuple([id], coq_term t1, coq_term t2)
-  | Tbinop (b, t1, t2) -> 
-      let ct1 = coq_term t1 in
-      let ct2 = coq_term t2 in
-      begin match b with
-      | Tand | Tand_asym -> coq_app_conj ct1 ct2
-      | Tor | Tor_asym -> coq_app_disj ct1 ct2
-      | Timplies -> Coq_impl (ct1, ct2)
-      | Tiff -> coq_apps (coq_var "Coq.Init.Logic.iff") [ct1; ct2] end
-  | Tnot t -> coq_app coq_not (coq_term t)
-  | Told t -> coq_term t
+and coq_term ?(poly_vars=[]) t =
+    match t.Tterm.t_node with
+    | Tvar v -> coq_id v.vs_name
+    | Tconst c -> coq_const c
+    | Tapp (f, [t]) when
+           is_ignore (mk_qualid f.ls_name.id_str f.ls_name.id_path) ->
+       (coq_term ~poly_vars) t
+    | Tapp (f, [t1; t2])
+         when f.ls_name.id_str = "apply" ->
+       coq_app (coq_term ~poly_vars t1) (coq_term ~poly_vars t2)
+    | Tapp (f, [t1; t2])
+         when f.ls_name.id_str = "remove"
+              && f.ls_name.id_path = ["Gospelstdlib"; "Set"] ->
+       let singleton_set = coq_var "TLC.LibSet.single_impl" in
+       let set = coq_app singleton_set ((coq_term ~poly_vars) t1) in
+       let var = coq_id f.ls_name in
+       coq_apps var [(coq_term ~poly_vars) t2; set]
+    | Tapp (f, t1::t) when
+           ls_equal f ps_equ &&
+             ty_equal t1.t_ty ty_bool ->
+       let ct1 = coq_term ~poly_vars t1 in
+       let arg_maybe = List.map (coq_term ~poly_vars) t in 
+       coq_apps (coq_var "Coq.Init.Logic.iff") (ct1::arg_maybe)
+    | Tapp (f, []) when ls_equal f fs_bool_true  ->
+       coq_prop_true
+    | Tapp (f, []) when ls_equal f fs_bool_false  ->
+       coq_prop_false
+    | Tapp (f, args) ->
+       let var = coq_id f.ls_name in
+       coq_apps var (List.map (coq_term ~poly_vars) args)
+    | Tfield _ -> assert false
+    | Tif(g, th, el) ->
+       let gc = coq_term ~poly_vars g in
+       let thc = coq_term ~poly_vars th in
+       let elc = coq_term ~poly_vars el in
+       coq_if_prop gc thc elc
+    | Tcase (t, l) ->
+       let e = coq_term ~poly_vars t in 
+       if ty_equal t.t_ty ty_bool then
+         to_prop_case e l
+       else
+         coq_match e (List.map case l)
+    | Tquant(q, ids, t) ->
+       let f = match q with |Tforall -> coq_foralls |Texists -> coq_exists in
+       let quant_poly = get_poly_list (List.map (fun x -> x.vs_ty) ids) in
+       let poly_vars = List.filter (fun x -> not (List.mem x poly_vars)) quant_poly in
+       let ids = List.map gen_args ids in
+       let quant = f ids (coq_term ~poly_vars t) in
+       coq_foralls (coq_types (poly_vars)) quant
+    | Tlambda(vl, t) ->
+       coq_funs (List.map var_of_pat vl) (coq_term t)
+    | Tlet (vs, t1, t2) ->
+       let id = coq_id vs.vs_name in
+       Coq_lettuple([id], coq_term t1, coq_term t2)
+    | Tbinop (b, t1, t2) -> 
+       let ct1 = coq_term t1 in
+       let ct2 = coq_term t2 in
+       begin match b with
+       | Tand | Tand_asym -> coq_app_conj ct1 ct2
+       | Tor | Tor_asym -> coq_app_disj ct1 ct2
+       | Timplies -> Coq_impl (ct1, ct2)
+       | Tiff -> coq_apps (coq_var "Coq.Init.Logic.iff") [ct1; ct2] end
+    | Tnot t -> coq_app coq_not (coq_term t)
+    | Told t -> coq_term t
 
-let rec cfml_term = function
-  | Star l -> hstars (List.map cfml_term l)
-  | Pure t -> hpure (coq_term t)
+let rec cfml_term poly_vars = function
+  | Star l -> hstars (List.map (cfml_term poly_vars) l)
+  | Pure t -> hpure (coq_term ~poly_vars t)
   | App (sym, l) ->
       let loc = List.hd l in
       let rep = List.nth l (List.length l - 1) in
       hdata (coq_id loc.vs_name)
         (coq_app (coq_id sym.ls_name) (coq_id rep.vs_name))
   | Exists (l, term) ->
-      let coq_term = cfml_term term in
+      let coq_term = cfml_term poly_vars term in
       List.fold_right
         (fun v acc -> hexists v.vs_name.id_str (var_of_ty v.vs_ty) acc)
         l coq_term
   | _ -> assert false
 
-let get_poly args =
-  let rec get_poly ty = match ty.ty_node with
-    |Tyvar v -> [String.capitalize_ascii v.tv_name.id_str]
-    |Tyapp (_, l) -> List.concat_map get_poly l in
-  List.concat_map (fun v -> get_poly v.vs_ty) args
-  |> List.sort_uniq compare
+let rm_dup : string list -> string list = List.sort_uniq compare
 
+let gen_poly poly_vars =
+  let types = coq_types poly_vars in
+  let inhab = coq_var "Inhab" in
+  let inhab_h = List.map (fun (v, x) -> v ^ "Ih", coq_app inhab x) types in
+   types @ inhab_h
+  
 let gen_spec triple =
-  let poly_vars = get_poly triple.triple_vars in
+  let poly_vars = get_vs_poly (triple.triple_vars @ triple.triple_rets) in
+  let poly = gen_poly poly_vars in 
   let args = List.map gen_args_opt triple.triple_args in
   let all_vars = List.map gen_args triple.triple_vars in
   let dynargs = List.map (fun (x, t) -> coq_dyn_of t (coq_var x)) args in
   let trm = trm_apps_lifted (coq_var triple.triple_name.id_str) dynargs in
-  let pre = cfml_term triple.triple_pre in
-  let rets, poly_ret =
+  let pre = cfml_term poly_vars triple.triple_pre in
+  let rets =
     match triple.triple_rets with
-    | [] -> [ ("_", coq_typ_unit) ], [] 
+    | [] -> [ ("_", coq_typ_unit) ]
     | rets ->
        let f v = v.vs_name.id_str, var_of_ty ~b2p:false v.vs_ty in
-       List.map f rets, get_poly rets in 
-  let post = coq_funs rets (cfml_term triple.triple_post) in
+       List.map f rets in
+  let post = coq_funs rets (cfml_term poly_vars  triple.triple_post) in
   let triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
   let triple_vars = coq_foralls all_vars triple in
-  let triple_ret = coq_foralls (coq_types poly_ret) triple_vars in
-  coq_foralls (coq_types poly_vars) triple_ret
+  coq_foralls poly triple_vars
 
 let mk_enc = (^) "_E"
 
-let sep_def d =
+let rec sep_def d =
   match d.d_node with
-  | Type (id, _) -> [
-      Coqtop_param (id.id_str, Coq_type);
-      Coqtop_context [mk_enc id.id_str, enc_type  (coq_var id.id_str)]
+  | Type (id, l) ->
+     let vars = coq_impls (List.map (fun _ -> Coq_type) l) Coq_type in 
+     [
+      Coqtop_param (id.id_str, vars);
+      (* Coqtop_context [mk_enc id.id_str, enc_type  (coq_var id.id_str)] *)
     ]
   | Pred (id, args) ->
      let args = List.rev args in
-     let poly = get_poly args in
+     let poly = get_vs_poly args in
+     let poly = gen_poly poly in 
      let types = List.map (fun v -> var_of_ty v.vs_ty) args in
      let t = coq_impls types hprop in
-     let with_poly = coq_foralls (coq_types poly) t in
-     [ Coqtop_param (id.id_str, with_poly) ]
+     let with_poly = coq_foralls poly t in
+     [ Coqtop_param (valid_coq_id id.id_str, with_poly) ]
   | Triple triple ->
      let fun_def = triple.triple_name.id_str, Formula.func_type in
      let fun_triple = gen_spec triple in
      let triple_name = to_triple triple.triple_name.id_str in
      coqtop_params [ fun_def; (triple_name, fun_triple) ]
   | Function f ->
-     let name = f.fun_ls.ls_name.id_str in
+     let name = valid_coq_id f.fun_ls.ls_name.id_str in
      let args = f.fun_params in
      let ret = f.fun_ls.ls_value in
-     let ret_coq = var_of_ty ret in 
-     let args_coq = List.map (fun arg -> arg.vs_name.id_str, var_of_ty arg.vs_ty) args in
+     let ret_coq = var_of_ty ret in
+     let args_coq =
+       List.map (fun arg -> arg.vs_name.id_str, var_of_ty arg.vs_ty) args in
+     let poly = get_poly_list (ret::(List.map (fun x -> x.vs_ty)) args) in
+     let poly_types = gen_poly poly in
      let def = Option.map coq_term f.fun_def in
      begin match def with
-     |Some d -> 
-       let coq_def = name, args_coq, ret_coq, d in 
+     |Some d ->
+       let coq_def = name, poly_types @ args_coq, ret_coq, d in
        if f.fun_rec then
          [coqtop_fixdef coq_def]
        else
          [coqtop_fundef coq_def]
-     |None -> coqtop_params [name, coq_impls (List.map snd args_coq) ret_coq] end
+     |None ->
+       let t = coq_impls (List.map snd args_coq) ret_coq in
+       let poly_args = coq_foralls poly_types t in
+       coqtop_params [name, poly_args] end
   | Axiom a ->
      coqtop_params [a.ax_name.id_str, coq_term a.ax_term]
-
+  | Module (nm, l) ->
+     let statements = List.concat_map sep_def l in
+     let m = Coqtop_module(nm.id_str, [], Mod_cast_free, Mod_def_declare) in
+     m :: statements @ [Coqtop_end nm.id_str]
+     
 let sep_defs l =
   let cfml = List.map (fun s -> "CFML." ^ s) in
   let imports =
