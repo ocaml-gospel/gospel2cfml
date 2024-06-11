@@ -120,6 +120,13 @@ let get_poly_list args =
 let get_vs_poly args =
   get_poly_list (List.map (fun x -> x.vs_ty) args)
 
+let gen_poly poly_vars =
+  let types = coq_types poly_vars in
+  let inhab = coq_var "Inhab" in
+  let inhab_h = List.map (fun (v, _) -> v ^ "Ih", coq_app inhab (coq_var v)) types in
+   types @ inhab_h
+
+
 let rec case (p, _, t) = coq_pattern p, coq_term t
 and bool_case al p t =
   let t = coq_term t in
@@ -182,8 +189,8 @@ and coq_term ?(poly_vars=[]) t =
        let quant_poly = get_poly_list (List.map (fun x -> x.vs_ty) ids) in
        let poly_vars = List.filter (fun x -> not (List.mem x poly_vars)) quant_poly in
        let ids = List.map gen_args ids in
-       let quant = f ids (coq_term ~poly_vars t) in
-       coq_foralls (coq_types (poly_vars)) quant
+       let quant = f ids (coq_term ~poly_vars t) in       
+       coq_foralls (gen_poly poly_vars) quant
     | Tlambda(vl, t) ->
        coq_funs (List.map var_of_pat vl) (coq_term t)
     | Tlet (vs, t1, t2) ->
@@ -216,12 +223,6 @@ let rec cfml_term poly_vars = function
   | _ -> assert false
 
 let rm_dup : string list -> string list = List.sort_uniq compare
-
-let gen_poly poly_vars =
-  let types = coq_types poly_vars in
-  let inhab = coq_var "Inhab" in
-  let inhab_h = List.map (fun (v, x) -> v ^ "Ih", coq_app inhab x) types in
-   types @ inhab_h
   
 let gen_spec triple =
   let poly_vars = get_vs_poly (triple.triple_vars @ triple.triple_rets) in

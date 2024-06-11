@@ -46,7 +46,7 @@ let type_check load_path name sigs =
 
 let () =
   let open Parser_frontend in
-  let load_path = [ Filename.dirname fname ] in
+    let load_path = [ Filename.dirname fname ] in
   let ocaml = parse_ocaml fname in
   let module_nm = path2module fname in
   let sigs = parse_gospel ~filename:fname ocaml module_nm in
@@ -60,7 +60,7 @@ let () =
   let () = if not (Sys.file_exists base_dir) then
     Sys.mkdir base_dir 0o755 else () in 
   let directory = base_dir ^ "/" ^ out_fname in
-  
+
   let fmt = formatter_of_out_channel (open_out directory) in
   fprintf fmt "%s@." (Print_coq.tops file_cfml)
 
