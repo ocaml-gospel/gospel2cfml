@@ -22,21 +22,21 @@ let mk_qualid name path =
   List.fold_right (fun s1 s2 -> s1 ^ "." ^ s2) path name
 
 let id_mapper = function
-  |"prefix -" -> "neg"
-  |"infix +" -> "add"
-  |"infix -" -> "minus"
-  |"infix *" -> "mult"
-  |"infix /" -> "div"
-  |"infix >" -> "gt"
-  |"infix >=" -> "ge"
-  |"infix <" -> "lt"
-  |"infix <=" -> "le"
-  |"infix ++" -> "app"
-  |"mixfix [_]" -> "seq_get"
-  |"mixfix [_.._]" -> "seq_sub"
-  |"mixfix [_..]" -> "seq_sub_l"
-  |"mixfix [.._]" -> "seq_sub_r"
-  |"mixfix [->]" -> "map_set"
+  (* |"prefix -" -> "neg" *)
+  (* |"infix +" -> "add" *)
+  (* |"infix -" -> "minus" *)
+  (* |"infix *" -> "mult" *)
+  (* |"infix /" -> "div" *)
+  (* |"infix >" -> "gt" *)
+  (* |"infix >=" -> "ge" *)
+  (* |"infix <" -> "lt" *)
+  (* |"infix <=" -> "le" *)
+  (* |"infix ++" -> "app" *)
+  (* |"mixfix [_]" -> "seq_get" *)
+  (* |"mixfix [_.._]" -> "seq_sub" *)
+  (* |"mixfix [_..]" -> "seq_sub_l" *)
+  (* |"mixfix [.._]" -> "seq_sub_r" *)
+  (* |"mixfix [->]" -> "map_set" *)
   |s -> s
 
 let coq_keywords = ["mod"; "Set"]
@@ -48,7 +48,7 @@ let valid_coq_id s =
 
 let map_sym map id =
   match id.Ident.id_path with
-  (*| "Gospelstdlib"::t *) | "#Base_lang"::t  ->
+  | "Gospelstdlib"::t  | "#Base_lang"::t  ->
                               let qualid = mk_qualid id.id_str t in
                               begin try M.find qualid map with
                                     |Not_found -> id.id_str end
@@ -207,19 +207,13 @@ and coq_term ?(poly_vars=[]) t =
     | Tnot t -> coq_app coq_not (coq_term t)
     | Told t -> coq_term t
 
-let rec cfml_term poly_vars = function
-  | Star l -> hstars (List.map (cfml_term poly_vars) l)
+let  cfml_term poly_vars = function
   | Pure t -> hpure (coq_term ~poly_vars t)
   | App (sym, l) ->
       let loc = List.hd l in
       let rep = List.nth l (List.length l - 1) in
-      hdata (coq_id loc.vs_name)
-        (coq_app (coq_id sym.ls_name) (coq_id rep.vs_name))
-  | Exists (l, term) ->
-      let coq_term = cfml_term poly_vars term in
-      List.fold_right
-        (fun v acc -> hexists v.vs_name.id_str (var_of_ty v.vs_ty) acc)
-        l coq_term
+      hdata (coq_term loc)
+        (coq_app (coq_id sym.ls_name) (coq_term rep))
   | _ -> assert false
 
 let rm_dup : string list -> string list = List.sort_uniq compare
@@ -231,14 +225,22 @@ let gen_spec triple =
   let all_vars = List.map gen_args triple.triple_vars in
   let dynargs = List.map (fun (x, t) -> coq_dyn_of t (coq_var x)) args in
   let trm = trm_apps_lifted (coq_var triple.triple_name.id_str) dynargs in
-  let pre = cfml_term poly_vars triple.triple_pre in
+  let mk_condition tl =
+    hstars (List.map (cfml_term poly_vars) tl) in
+  let pre = mk_condition triple.triple_pre in
   let rets =
     match triple.triple_rets with
     | [] -> [ ("_", coq_typ_unit) ]
     | rets ->
        let f v = v.vs_name.id_str, var_of_ty ~b2p:false v.vs_ty in
        List.map f rets in
-  let post = coq_funs rets (cfml_term poly_vars  triple.triple_post) in
+  let mk_post (vl, tl) =
+    let post = mk_condition tl in
+    List.fold_right
+      (fun v acc -> hexists v.vs_name.id_str (var_of_ty v.vs_ty) acc)
+      vl post
+  in
+  let post = coq_funs rets (mk_post triple.triple_post) in
   let triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
   let triple_vars = coq_foralls all_vars triple in
   coq_foralls poly triple_vars
