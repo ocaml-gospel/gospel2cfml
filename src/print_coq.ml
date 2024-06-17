@@ -114,7 +114,8 @@ let tuple expr es = parens (separate_map (comma ^^ break 1) expr es)
 
 (* Bindings, or annotations: [x : t]. *)
 
-let binding x t = block (x ^^ spacecolon) (space ^^ t) empty
+let binding x t =
+  block (x ^^ spacecolon) (space ^^ t) empty
 
 (* -------------------------------------------------------------------------- *)
 
@@ -177,16 +178,18 @@ and expr3 = function
         (break 1 ^^ expr e1)
         (break 1 ^^ string "in")
       ^/^ expr3 e2
-  | Coq_forall ((x, e1), e2) ->
+  | Coq_forall ({var_name=x; var_type=e1; var_impl}, e2) ->
+     let start, _end = if var_impl then lbrace, rbrace else empty, empty in
+       block
+         (string "forall " ^^ start ^^ string x ^^ spacecolon)
+         (break 1 ^^ expr e1 ^^ _end ^^ comma)
+         empty
+       ^/^ expr3 e2
+  | Coq_fun ({var_name=x; var_type=e1; var_impl}, e2) ->
+     let start, _end = if var_impl then lbrace, rbrace else empty, empty in
       block
-        (string "forall " ^^ string x ^^ spacecolon)
-        (break 1 ^^ expr e1 ^^ comma)
-        empty
-      ^/^ expr3 e2
-  | Coq_fun ((x, e1), e2) ->
-      block
-        (string "fun" ^^ space ^^ string x ^^ spacecolon)
-        (break 1 ^^ expr e1)
+        (string "fun" ^^ space ^^ start ^^ string x ^^ spacecolon)
+        (break 1 ^^ expr e1 ^^ _end)
         (break 1 ^^ doublearrow)
       ^/^ expr3 e2
   | Coq_fix (f, n, crettype, ebody) ->
@@ -241,11 +244,14 @@ and expr e = expr3 e
 
 (* Raw. *)
 
-and var (x, t) = binding (string x) (expr t)
+and var {var_name=x; var_type=t; _} = binding (string x) (expr t)
 
 (* With parentheses and with a leading space. *)
 
-and pvar xt = space ^^ parens (var xt)
+and pvar xt =
+  let v = var xt in 
+  space ^^ (if xt.var_impl then braces v else parens v)
+
 and pvars xts = group (concat_map pvar xts)
 
 (* A list of field type declarations, separated with semicolons. *)
@@ -362,7 +368,7 @@ let implicit (x, i) =
 (* Toplevel elements. *)
 
 let rec top_internal = function
-  | Coqtop_def ((x, e1), e2) ->
+  | Coqtop_def ({var_name=x; var_type=e1; _}, e2) ->
       string "Definition" ^^ definition (string x) (expr e1) ^/^ expr e2 ^^ dot
   | Coqtop_fundef (isrec, defs) ->
       let first_keyword, other_keyword =
@@ -388,14 +394,14 @@ let rec top_internal = function
         ^^ expr body (* TODO: ident?*)
       in
       concat_map mk_def defs ^^ dot
-  | Coqtop_param (x, e1) -> string "Parameter" ^^ parameter (string x) (expr e1)
-  | Coqtop_instance ((x, e1), e2o, global) -> (
+  | Coqtop_param {var_name=x; var_type=e1; _} -> string "Parameter" ^^ parameter (string x) (expr e1)
+  | Coqtop_instance ({var_name=x; var_type=e1; _}, e2o, global) -> (
       string ((if global then "Global " else "") ^ "Instance")
       ^^
       match e2o with
       | None -> parameter (string x) (expr e1)
       | Some e2 -> definition (string x) (expr e1) ^/^ expr e2 ^^ dot)
-  | Coqtop_lemma (x, e1) -> string "Lemma" ^^ parameter (string x) (expr e1)
+  | Coqtop_lemma {var_name=x; var_type=e1; _} -> string "Lemma" ^^ parameter (string x) (expr e1)
   | Coqtop_proof s -> sprintf "Proof. %s Qed." s
   | Coqtop_record r -> string "Record" ^^ inductive_lhs record_rhs r ^^ dot
   | Coqtop_ind rs ->

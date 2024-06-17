@@ -11,7 +11,11 @@ let list_make n v = List.init n (fun _ -> v)
 
 type var = string
 and vars = var list
-and typed_var = var * coq
+and typed_var = {
+    var_name : var;
+    var_type : coq;
+    var_impl : bool;
+  }
 and typed_vars = typed_var list
 and coq_path = Coqp_var of var | Coqp_dot of coq_path * string
 
@@ -46,6 +50,8 @@ and coq =
 (* DEPRECATED ; maybe future ?  | Coq_list of coq list *)
 
 and coqs = coq list
+
+let tv var_name var_type var_impl = {var_name; var_type; var_impl}
 
 (** Toplevel declarations *)
 
@@ -137,14 +143,16 @@ let coq_mapper (f : coq -> coq) (c : coq) : coq =
       let r1 = f c1 in
       let r2 = f c2 in
       Coq_lettuple (rs, r1, r2)
-  | Coq_forall ((x, c1), c2) ->
-      let r1 = f c1 in
-      let r2 = f c2 in
-      Coq_forall ((x, r1), r2)
-  | Coq_fun ((x, c1), c2) ->
-      let r1 = f c1 in
-      let r2 = f c2 in
-      Coq_fun ((x, r1), r2)
+  | Coq_forall (v, c2) ->
+     let r1 = f v.var_type in
+     let v = {v with var_type = r1} in 
+     let r2 = f c2 in
+     Coq_forall (v, r2)
+  | Coq_fun (v, c2) ->
+     let r1 = f v.var_type in
+     let v = {v with var_type = r1} in 
+     let r2 = f c2 in
+     Coq_fun (v, r2)
   | Coq_fix (x, n, c1, c2) ->
       let r1 = f c1 in
       let r2 = f c2 in
@@ -186,7 +194,7 @@ let coq_mapper (f : coq -> coq) (c : coq) : coq =
       let r1 = f c1 in
       Coq_par r1
 
-let coq_mapper_in_typedvar (f : coq -> coq) (x, c) : typed_var = (x, f c)
+let coq_mapper_in_typedvar (f : coq -> coq) v : typed_var = {v with var_type = f v.var_type}
 
 let coq_mapper_in_coqind (f : coq -> coq) (ci : coqind) : coqind =
   {
@@ -234,7 +242,7 @@ let coq_mapper_in_coqtop (f : coq -> coq) (ct : coqtop) : coqtop =
 
 (** Toplevel *)
 
-let coqtop_def_untyped x c = Coqtop_def ((x, Coq_wild), c)
+let coqtop_def_untyped x c = Coqtop_def ({var_name=x; var_type=Coq_wild; var_impl=false}, c)
 let coqtop_noimplicit x = Coqtop_implicit (x, [])
 let coqtop_register db x v = Coqtop_register (db, x, v)
 
@@ -343,7 +351,7 @@ let coq_app_var_at x args =
 
 (** List of types [(A1:Type)::(A2::Type)::...::(AN:Type)::nil] *)
 
-let coq_types names = List.map (fun n -> (n, Coq_type)) names
+let coq_types names = List.map (fun n -> tv n Coq_type false) names
 
 (** Builds either [c] or [_], depending on whether the value passed in [Some c]
     or [None] *)
@@ -393,12 +401,12 @@ let coq_if_prop c0 c1 c2 = Coq_if (Coq_app (Coq_var "classicT", c0), c1, c2)
 (** Existential [exists (x:c1), c2] *)
 
 let coq_exist x c1 c2 =
-  coq_apps (Coq_var "Coq.Init.Logic.ex") [ coq_fun (x, c1) c2 ]
+  coq_apps (Coq_var "Coq.Init.Logic.ex") [ coq_fun (tv x c1 false) c2 ]
 
 (** Existential [exists (x1:T1) .. (xn:Tn), c] *)
 
 let coq_exists xcs c2 =
-  List.fold_right (fun (x, c) acc -> coq_exist x c acc) xcs c2
+  List.fold_right (fun {var_name=x; var_type=c;_} acc -> coq_exist x c acc) xcs c2
 
 (** Universal [forall (x1:T1) .. (xn:Tn), c] *)
 
@@ -412,7 +420,7 @@ let coq_forall_types names c = coq_foralls (coq_types names) c
 (** Universal [forall (x1:_) .. (xn:_), c] *)
 
 let coq_foralls_wild names c =
-  coq_foralls (List.map (fun n -> (n, Coq_wild)) names) c
+  coq_foralls (List.map (fun n -> (tv n Coq_wild false)) names) c
 
 (** Implication [c1 -> c2] *)
 
