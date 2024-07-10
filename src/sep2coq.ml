@@ -218,7 +218,9 @@ let cfml_term poly_vars = function
   
 let gen_spec triple =
   let poly_vars = triple.triple_poly in 
-  let poly = gen_poly poly_vars in 
+  let poly = gen_poly poly_vars in
+  let encs = List.map (fun x -> enc_arg x.tv_name.id_str) poly_vars in
+  
   let args = List.map gen_args_opt triple.triple_args in
   let all_vars = List.map gen_args triple.triple_vars in
   let dynargs = List.map (fun v -> coq_dyn_of v.var_type (coq_var v.var_name)) args in
@@ -241,9 +243,7 @@ let gen_spec triple =
   let post = coq_funs rets (mk_post triple.triple_post) in
   let triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
   let triple_vars = coq_foralls all_vars triple in
-  coq_foralls poly triple_vars
-
-let mk_enc = (^) "_E"
+  coq_foralls (poly@encs) triple_vars
 
 let rec sep_def d =
   match d.d_node with
@@ -255,10 +255,11 @@ let rec sep_def d =
     ]
   | Pred pred ->
      let args = List.rev pred.pred_args in
-     let poly = gen_poly pred.pred_poly in 
+     let poly = gen_poly pred.pred_poly in
+     let encs = List.map (fun x -> enc_arg x.tv_name.id_str) pred.pred_poly in
      let types = List.map (fun v -> var_of_ty v.vs_ty) args in
      let t = coq_impls types hprop in
-     let with_poly = coq_foralls poly t in
+     let with_poly = coq_foralls (poly@encs) t in
      [ Coqtop_param (tv (valid_coq_id pred.pred_name.id_str) with_poly false) ]
   | Triple triple ->
      let fun_def = tv triple.triple_name.id_str Formula.func_type false in
@@ -293,13 +294,14 @@ let rec sep_def d =
      let nm_var = valid_coq_id nm.id_str in
      let m = Coqtop_module(nm_var, [], Mod_cast_free, Mod_def_declare) in
      m :: statements @ [Coqtop_end nm_var]
+  | Import l -> [ Coqtop_import l ]
      
 let sep_defs l =
   let cfml = List.map (fun s -> "CFML." ^ s) in
   let imports =
     [
       Coqtop_set_implicit_args;
-      Coqtop_require_import [ "Gospel" ];
+      Coqtop_require_import [ "gospelstdlib_verified" ];
       Coqtop_require
         [
           "Coq.ZArith.BinInt";

@@ -36,8 +36,8 @@ let path2module p =
 let base_fname f = Filename.basename f |> Filename.chop_extension
 
 let type_check load_path name sigs =
-  let md = init_muc name in
   let mn = path2module name in
+  let md = init_muc mn in
   let penv =
      Utils.Sstr.singleton mn |> Typing.penv load_path
   in

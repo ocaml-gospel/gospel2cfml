@@ -86,7 +86,7 @@ let enc_of_typed typ c =
 
 let enc_arg aname =
   let eaname = "E" ^ aname in (* TODO: check conflicts *)
-  tv eaname (enc_type (coq_var aname)) false
+  tv eaname (enc_type (coq_var aname)) true
 
 (* enc_args builds [(A1:Type) (EA1:Enc A1) .. (xn:Type) (EAn:Enc An)] from [A1... An]*)
 
