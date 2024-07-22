@@ -86,12 +86,11 @@ exception WIP
 let coq_id ?(qual=[]) id = coq_var (map_id qual id)
 let gen_args vs = tv vs.vs_name.id_str (var_of_ty ~b2p:false vs.vs_ty) false
 
-let gen_args_opt arg =
-  match arg with
-  | None ->
+let gen_args_opt vs =
+  if vs.vs_name.id_str = "()" then 
      let v = match coq_tt with Coq_var v -> v | _ -> assert false in
-     tv v val_type false
-  | Some vs -> gen_args vs
+     tv v val_type false else
+    gen_args vs
 
 let rec coq_pattern p =
   match p.Tterm.p_node with
