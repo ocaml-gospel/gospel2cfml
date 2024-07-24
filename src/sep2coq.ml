@@ -240,8 +240,12 @@ let gen_spec triple =
       vl post
   in
   let post = coq_funs rets (mk_post triple.triple_post) in
-  let triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
-  let triple_vars = coq_foralls all_vars triple in
+  let coq_triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
+  let check =
+    coq_impls
+      (List.map (coq_term ~poly_vars) triple.triple_checks)
+      coq_triple in
+  let triple_vars = coq_foralls all_vars check in
   coq_foralls (poly@encs) triple_vars
 
 let rec sep_def d =

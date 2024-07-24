@@ -22,6 +22,7 @@ val pop : 'a t -> 'a
 (*@ r = pop p
     modifies p
     raises Not_found
+    checks p = empty
     ensures (old p) = cons r p *)
 
 val clear : 'a t -> unit
