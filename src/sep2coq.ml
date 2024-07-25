@@ -41,7 +41,7 @@ let id_mapper = function
   |"prefix !" -> "_UNUSED"
   |s -> s
 
-let coq_keywords = ["mod"; "Set"]
+let coq_keywords = ["mod"; "Set"; "Alias"]
 
 let valid_coq_id s =
   if List.mem s coq_keywords
@@ -51,8 +51,6 @@ let valid_coq_id s =
 let qual_var qual id =
   List.fold_left (fun acc x -> (valid_coq_id x) ^ "." ^ acc) (valid_coq_id id) qual
   
-
-
 let map_sym map qual id =
   match id.Ident.id_path with
   (*| "Gospelstdlib"::t *)  | "#Base_lang"::t  ->
@@ -148,13 +146,6 @@ and coq_term ?(poly_vars=[]) t =
     | Tapp (_, f, [t1; t2])
          when f.ls_name.id_str = "apply" ->
        coq_app (coq_term ~poly_vars t1) (coq_term ~poly_vars t2)
-    | Tapp (_, f, [t1; t2])
-         when f.ls_name.id_str = "remove"
-              && f.ls_name.id_path = ["Gospelstdlib"; "Set"] ->
-       let singleton_set = coq_var "TLC.LibSet.single_impl" in
-       let set = coq_app singleton_set ((coq_term ~poly_vars) t1) in
-       let var = coq_id f.ls_name in
-       coq_apps var [(coq_term ~poly_vars) t2; set]
     | Tapp (_, f, t1::t) when
            ls_equal f ps_equ &&
              ty_equal t1.t_ty ty_bool ->
@@ -168,8 +159,17 @@ and coq_term ?(poly_vars=[]) t =
     | Tapp (qual, f, []) ->
        let poly = Tast2sep.get_poly t.t_ty in
        let var = coq_id f.ls_name in
-       let var = match var with |Coq_var v -> Coq_var ("@" ^ qual_var qual v) |_ -> assert false in
-       let targs = List.concat_map (fun tv -> [Coq_var tv.tv_name.id_str; Coq_var (tv.tv_name.id_str^"Ih")]) poly in
+       let var =
+         match var with
+         |Coq_var v ->
+           let name = qual_var qual v in
+           let name = if poly = [] then name else "@" ^ name in
+           Coq_var name |_ -> assert false in
+       let targs =
+         List.concat_map
+           (fun tv ->
+             [Coq_var tv.tv_name.id_str;
+              Coq_var (tv.tv_name.id_str^"Ih")]) poly in
        coq_apps var targs
     | Tapp (qual, f, args) ->
        let var = coq_id ~qual f.ls_name in
@@ -223,7 +223,7 @@ let gen_spec triple =
   let args = List.map gen_args_opt triple.triple_args in
   let all_vars = List.map gen_args triple.triple_vars in
   let dynargs = List.map (fun v -> coq_dyn_of v.var_type (coq_var v.var_name)) args in
-  let trm = trm_apps_lifted (coq_var triple.triple_name.id_str) dynargs in
+  let trm = trm_apps_lifted (coq_var ("_"^triple.triple_name.id_str)) dynargs in
   let mk_condition tl =
     hstars (List.map (cfml_term poly_vars) tl) in
   let pre = mk_condition triple.triple_pre in
@@ -243,19 +243,35 @@ let gen_spec triple =
   let coq_triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
   let check =
     coq_impls
-      (List.map (coq_term ~poly_vars) triple.triple_checks)
+      (List.map (fun x -> coq_term ~poly_vars x) triple.triple_checks)
       coq_triple in
   let triple_vars = coq_foralls all_vars check in
   coq_foralls (poly@encs) triple_vars
 
+let mk_enc s = "_Enc_" ^ s
+
 let rec sep_def d =
   match d.d_node with
   | Type tdef ->     
-     let vars = coq_impls (List.map (fun _ -> Coq_type) tdef.type_args) Coq_type in 
+     let ty = coq_impls (List.map (fun _ -> Coq_type) tdef.type_args) Coq_type in
+     let nm = tdef.type_name.id_str in
+     let ty_decl = tv nm ty false in
+     let self_ty =
+       coq_apps (coq_var nm)
+         (coq_vars (List.map (fun x-> x.tv_name.id_str) tdef.type_args)) in
+     let poly =
+       List.map
+         (fun x -> tv x.tv_name.id_str Coq_type false) tdef.type_args in 
+     let self_ty_vars =
+       coq_foralls poly (enc_type self_ty) in
+     let enc_name_par = "__Enc_" ^ nm in
+     let enc_name = "_Enc_" ^ nm in
+     let term = Coq_var enc_name_par in 
      [
-      Coqtop_param (tv tdef.type_name.id_str vars false)
-      (* Coqtop_context [mk_enc id.id_str, enc_type  (coq_var id.id_str)] *)
-    ]
+      Coqtop_param ty_decl;
+      Coqtop_param (tv enc_name_par self_ty_vars false);
+      Coqtop_instance (tv enc_name self_ty_vars false, Some term, false);
+     ]
   | Pred pred ->
      let args = List.rev pred.pred_args in
      let poly = gen_poly pred.pred_poly in
@@ -265,7 +281,7 @@ let rec sep_def d =
      let with_poly = coq_foralls (poly@encs) t in
      [ Coqtop_param (tv (valid_coq_id pred.pred_name.id_str) with_poly false) ]
   | Triple triple ->
-     let fun_def = tv triple.triple_name.id_str Formula.func_type false in
+     let fun_def = tv ("_"^triple.triple_name.id_str) Formula.func_type false in
      let fun_triple = gen_spec triple in
      let triple_name = to_triple triple.triple_name.id_str in
      coqtop_params [ fun_def; tv triple_name fun_triple false ]
@@ -297,7 +313,7 @@ let rec sep_def d =
      let nm_var = valid_coq_id nm.id_str in
      let m = Coqtop_module(nm_var, [], Mod_cast_free, Mod_def_declare) in
      m :: statements @ [Coqtop_end nm_var]
-  | Import l -> [ Coqtop_import l ]
+  | Import l -> [ Coqtop_import (List.map valid_coq_id l) ]
      
 let sep_defs l =
   let cfml = List.map (fun s -> "CFML." ^ s) in

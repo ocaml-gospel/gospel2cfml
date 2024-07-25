@@ -15,14 +15,13 @@ val is_empty : 'a t -> bool
 val push : 'a t -> 'a -> unit
 (*@ push p x
     modifies p
-    ensures p = cons x (old p)
-*)
+    ensures p = cons x (old p) *)
 
 val pop : 'a t -> 'a
 (*@ r = pop p
     modifies p
     raises Not_found
-    checks p = empty
+    checks p <> empty
     ensures (old p) = cons r p *)
 
 val clear : 'a t -> unit
@@ -35,8 +34,7 @@ val concat : 'a t -> 'a t -> unit
     modifies q1
     modifies q2
     ensures q1 = old (q1 ++ q2)
-    ensures q2 = empty
-*)
+    ensures q2 = empty *)
 
 val rev_append : 'a t -> 'a t -> unit
 (*@ rev_append p1 p2
