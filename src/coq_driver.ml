@@ -45,8 +45,8 @@ let word_size = "Gospel.word_size"
 
 let ignore_list =
   List.map ((^) "Gospelstdlib.") [
-      "Sequence.of_list";
-      "List.to_sequence";
+      (* "Sequence.of_list"; *)
+      (* "List.to_sequence"; *)
       "integer_of_int";
   ]
 

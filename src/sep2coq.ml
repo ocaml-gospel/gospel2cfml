@@ -53,10 +53,11 @@ let qual_var qual id =
   
 let map_sym map qual id =
   match id.Ident.id_path with
-  (*| "Gospelstdlib"::t *)  | "#Base_lang"::t  ->
-                              let qualid = mk_qualid id.id_str t in
-                              begin try M.find qualid map with
-                                    |Not_found -> id.id_str end
+  (*| "Gospelstdlib"::t *)
+  | "#Base_lang"::t  ->
+     let qualid = mk_qualid id.id_str t in
+     begin try M.find qualid map with
+           |Not_found -> id.id_str end
   |_ -> qual_var qual id.id_str
 
 let map_id qual id =
@@ -78,8 +79,6 @@ let var_of_ty ?(b2p=true) t =
     | Tyvar tv ->
        Coq_var tv.tv_name.id_str in
   var_of_ty t
-
-exception WIP
 
 let coq_id ?(qual=[]) id = coq_var (map_id qual id)
 let gen_args vs = tv vs.vs_name.id_str (var_of_ty ~b2p:false vs.vs_ty) false
@@ -174,7 +173,9 @@ and coq_term ?(poly_vars=[]) t =
     | Tapp (qual, f, args) ->
        let var = coq_id ~qual f.ls_name in
        coq_apps var (List.map (coq_term ~poly_vars) args)
-    | Tfield _ -> assert false
+    | Tfield(t, _, ls) ->
+       let t = coq_term ~poly_vars t in
+       coq_record_proj t ls.ls_name.id_str
     | Tif(g, th, el) ->
        let gc = coq_term ~poly_vars g in
        let thc = coq_term ~poly_vars th in
@@ -189,8 +190,7 @@ and coq_term ?(poly_vars=[]) t =
     | Tquant(q, ids, t) ->
        let f = match q with |Tforall -> coq_foralls |Texists -> coq_exists in
        let ids = List.map gen_args ids in
-       let quant = f ids (coq_term ~poly_vars t) in       
-       coq_foralls (gen_poly poly_vars) quant
+       f ids (coq_term ~poly_vars t)
     | Tlambda(vl, t) ->
        coq_funs (List.map var_of_pat vl) (coq_term t)
     | Tlet (vs, t1, t2) ->
@@ -252,10 +252,11 @@ let mk_enc s = "_Enc_" ^ s
 
 let rec sep_def d =
   match d.d_node with
-  | Type tdef ->     
+  | Type tdef when tdef.type_mut ->
+     []
+  | Type tdef ->
      let ty = coq_impls (List.map (fun _ -> Coq_type) tdef.type_args) Coq_type in
      let nm = tdef.type_name.id_str in
-     let ty_decl = tv nm ty false in
      let self_ty =
        coq_apps (coq_var nm)
          (coq_vars (List.map (fun x-> x.tv_name.id_str) tdef.type_args)) in
@@ -266,12 +267,23 @@ let rec sep_def d =
        coq_foralls poly (enc_type self_ty) in
      let enc_name_par = "__Enc_" ^ nm in
      let enc_name = "_Enc_" ^ nm in
-     let term = Coq_var enc_name_par in 
-     [
-      Coqtop_param ty_decl;
-      Coqtop_param (tv enc_name_par self_ty_vars false);
-      Coqtop_instance (tv enc_name self_ty_vars false, Some term, false);
-     ]
+     let term = Coq_var enc_name_par in
+     let ty_decl = tv nm ty false in
+     begin match tdef.type_def with
+     |Abstract -> [
+         Coqtop_param ty_decl;
+         Coqtop_param (tv enc_name_par self_ty_vars false);
+         Coqtop_instance (tv enc_name self_ty_vars false, Some term, false);
+       ]
+     |Record r ->
+       [Coqtop_record
+         {coqind_name= nm;
+          coqind_constructor_name= "_mk_" ^ nm;
+          coqind_targs= poly;
+          coqind_ret= coq_typ_type;
+          coqind_branches= List.map (fun (s, t) -> tv s.Ident.id_str (var_of_ty t) false) r;
+         }]
+     end
   | Pred pred ->
      let args = List.rev pred.pred_args in
      let poly = gen_poly pred.pred_poly in
