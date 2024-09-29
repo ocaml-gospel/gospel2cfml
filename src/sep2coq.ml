@@ -188,8 +188,9 @@ and coq_term ?(poly_vars=[]) t =
        else
          coq_match e (List.map case l)
     | Tquant(q, ids, t) ->
-       let f = match q with |Tforall -> coq_foralls |Texists -> coq_exists in
-       let ids = List.map gen_args ids in
+       let f = match q with
+         |Tforall -> coq_foralls |Texists -> coq_exists in
+       let ids = List.map (fun x -> gen_args x.Tterm.bind_vs) ids in
        f ids (coq_term ~poly_vars t)
     | Tlambda(vl, t) ->
        coq_funs (List.map var_of_pat vl) (coq_term t)
@@ -207,14 +208,26 @@ and coq_term ?(poly_vars=[]) t =
     | Tnot t -> coq_app coq_not (coq_term t)
     | Told t -> coq_term t
 
-let cfml_term poly_vars = function
+let cfml_term poly_vars t =
+  let rec cfml_term = function
   | Pure t -> hpure (coq_term ~poly_vars t)
-  | App (sym, l) ->
+  | Lift (sym, l) ->
       let loc = List.hd l in
       let rep = List.nth l (List.length l - 1) in
       hdata (coq_term loc)
         (coq_app (coq_id sym.ls_name) (coq_term rep))
-  
+  | Wand (l, r) ->
+     hwand (hstars (List.map cfml_term l)) (hstars (List.map cfml_term r))
+  | Quant (q, vs, t) ->
+     let f =
+       match q with
+       | Tforall -> hforalls
+       | Texists -> hexistss
+     in
+     let args = List.map (fun x -> x.vs_name.id_str, var_of_ty x.vs_ty) vs in
+     let t = hstars (List.map cfml_term t) in
+     f args t
+  in cfml_term t        
 let gen_spec triple =
   let poly_vars = triple.triple_poly in 
   let poly = gen_poly poly_vars in
@@ -227,19 +240,28 @@ let gen_spec triple =
   let mk_condition tl =
     hstars (List.map (cfml_term poly_vars) tl) in
   let pre = mk_condition triple.triple_pre in
-  let rets =
+  let rets_typ =
     match triple.triple_rets with
-    | [] -> [ tv "_" coq_typ_unit false ]
+    | [] -> coq_typ_unit
     | rets ->
-       let f v = tv v.vs_name.id_str (var_of_ty ~b2p:false v.vs_ty) false in
-       List.map f rets in
+       let f v = var_of_ty ~b2p:false v.vs_ty in
+       coq_typ_tuple (List.map f rets) in
+  
+  let res_name = "_res_" in
   let mk_post (vl, tl) =
     let post = mk_condition tl in
-    List.fold_right
+    let term = List.fold_right
       (fun v acc -> hexists v.vs_name.id_str (var_of_ty v.vs_ty) acc)
-      vl post
+      vl post in
+    match triple.triple_rets with
+    |[] -> term
+    |rets ->
+      let nms = List.map (fun x -> Coq_var x.vs_name.id_str) rets in
+      Coq_lettuple(nms, coq_var res_name, term)
   in
-  let post = coq_funs rets (mk_post triple.triple_post) in
+
+  let post = coq_fun (tv res_name rets_typ false) (mk_post triple.triple_post) in
+  
   let coq_triple = coq_apps_var "CFML.SepLifted.Triple" [ trm; pre; post ] in
   let check =
     coq_impls
@@ -252,8 +274,6 @@ let mk_enc s = "_Enc_" ^ s
 
 let rec sep_def d =
   match d.d_node with
-  | Type tdef when tdef.type_mut ->
-     []
   | Type tdef ->
      let ty = coq_impls (List.map (fun _ -> Coq_type) tdef.type_args) Coq_type in
      let nm = tdef.type_name.id_str in
@@ -318,8 +338,11 @@ let rec sep_def d =
        let poly_args = coq_foralls poly_types t in
        coqtop_params [tv name poly_args false] end
   | Axiom (poly, a) ->
-     let poly_types = gen_poly poly in 
-     coqtop_params [tv a.ax_name.id_str (coq_foralls poly_types (coq_term a.ax_term)) false]
+     let poly_types = gen_poly poly in
+     let encs = List.map (fun x -> enc_arg x.tv_name.id_str) poly in
+     let t = hstars (List.map (cfml_term poly_types) a.sax_term) in
+     let t = himpl hempty t in
+     coqtop_params [tv a.sax_name.id_str (coq_foralls (poly_types@encs) t) false]
   | Module (nm, l) ->
      let statements = List.concat_map sep_def l in
      let nm_var = valid_coq_id nm.id_str in
